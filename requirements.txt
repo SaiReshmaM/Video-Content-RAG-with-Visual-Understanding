@@ -1,0 +1,8 @@
+streamlit
+torch
+torchvision
+transformers
+faiss-cpu
+openai-whisper
+opencv-python
+Pillow
