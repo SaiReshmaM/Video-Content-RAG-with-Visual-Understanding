@@ -1,12 +1,16 @@
-
-
 import streamlit as st
 import os
+st.write("FFMPEG:", os.system("which ffmpeg"))
+st.write("LIBGL:", os.system("ldconfig -p | grep libGL"))
+
+# 🧠 Your existing imports
+from extract_frames import extract_key_frames
+from transcribe_audio import transcribe_audio
 from transcribe_audio import transcribe_audio
 from extract_frames import extract_key_frames
 from clip_search import embed_and_search, search_query
 
-st.title("🎥 Video RAG with Audio + Visual Understanding")
+st.title(" Video RAG with Audio + Visual Understanding")
 
 uploaded_video = st.file_uploader("Upload a video", type=["mp4"])
 
@@ -17,7 +21,7 @@ if uploaded_video:
 
     st.video(video_path)
 
-    if st.button("🔍 Process Video"):
+    if st.button(" Process Video"):
         st.info("Extracting key frames...")
         frame_paths = extract_key_frames(video_path)
         st.success(f"{len(frame_paths)} frames extracted.")
@@ -39,4 +43,5 @@ if query:
         st.image(img, width=300)
         st.caption(txt)
         st.write("Starting transcription...")
+
 
