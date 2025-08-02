@@ -1,5 +1,6 @@
-import streamlit as st
 import os
+import streamlit as st
+
 st.write("FFMPEG:", os.system("which ffmpeg"))
 st.write("LIBGL:", os.system("ldconfig -p | grep libGL"))
 
@@ -43,5 +44,6 @@ if query:
         st.image(img, width=300)
         st.caption(txt)
         st.write("Starting transcription...")
+
 
 
