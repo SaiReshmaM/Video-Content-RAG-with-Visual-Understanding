@@ -1,9 +1,8 @@
 streamlit
-opencv-python
 torch
+torchvision
 transformers
-chromadb
-openai-whisper
-Pillow
-
 faiss-cpu
+openai-whisper
+opencv-python
+Pillow
