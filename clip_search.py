@@ -1,39 +1,39 @@
 import os
-import torch
 import numpy as np
-import faiss
 from PIL import Image
+import torch
 from transformers import CLIPProcessor, CLIPModel
+import faiss
 
-# Load CLIP model and processor
+# Constants
+IMAGE_DIR = "keyframes"
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Load model
 model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-# Image directory
-IMAGE_DIR = "keyframes"
+# Globals
+image_map = {}
+index = None
 
-# Embedding storage
-image_embeddings = []
-image_map = {}  # index -> file path
 def build_index():
-    global image_embeddings, image_map, index
+    global image_map, index
     image_embeddings = []
-    image_map = {}
+    image_map.clear()
 
     if not os.path.exists(IMAGE_DIR):
-        print(f"[Error] Image directory not found: {IMAGE_DIR}")
+        print(f"Directory '{IMAGE_DIR}' not found.")
         return None
 
-    image_files = sorted([
+    image_files = [
         os.path.join(IMAGE_DIR, f)
         for f in os.listdir(IMAGE_DIR)
-        if f and isinstance(f, str) and f.lower().endswith((".jpg", ".png"))
-           and os.path.isfile(os.path.join(IMAGE_DIR, f))
-    ])
+        if f and f.lower().endswith((".jpg", ".png")) and os.path.isfile(os.path.join(IMAGE_DIR, f))
+    ]
 
     if not image_files:
-        print("[Warning] No keyframes found.")
+        print("No images found in keyframes.")
         return None
 
     for idx, path in enumerate(image_files):
@@ -45,26 +45,30 @@ def build_index():
             image_embeddings.append(embedding)
             image_map[idx] = path
         except Exception as e:
-            print(f"[Error] Skipping {path} due to: {e}")
+            print(f"Error processing {path}: {e}")
 
     embedding_dim = len(image_embeddings[0])
     index = faiss.IndexFlatL2(embedding_dim)
     index.add(np.array(image_embeddings).astype(np.float32))
-
     return index
 
+def search_query(text_query, k=3):
+    if index is None:
+        build_index()
 
-# Search using text query
-def search_query(query, k=5):
-    inputs = processor(text=[query], return_tensors="pt", padding=True).to(device)
+    if index is None or index.ntotal == 0:
+        return [], []
+
+    inputs = processor(text=[text_query], return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
-        text_embedding = model.get_text_features(**inputs).cpu().numpy()
+        text_embedding = model.get_text_features(**inputs).cpu().numpy().astype(np.float32)
 
-    D, I = index.search(text_embedding.astype(np.float32), k)
-    results = [image_map[i] for i in I[0] if i in image_map]
+    D, I = index.search(text_embedding, k)
 
-    return results, [f"Score: {d:.2f}" for d in D[0]]
-
-# Initialize the index
-index = build_index()
-
+    results = []
+    captions = []
+    for i in I[0]:
+        if i in image_map:
+            results.append(image_map[i])
+            captions.append(f"Matched: {os.path.basename(image_map[i])}")
+    return results, captions
