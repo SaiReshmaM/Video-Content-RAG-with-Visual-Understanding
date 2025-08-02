@@ -5,3 +5,5 @@ transformers
 chromadb
 openai-whisper
 Pillow
+
+faiss-cpu
