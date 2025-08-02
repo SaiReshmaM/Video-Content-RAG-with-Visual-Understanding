@@ -1,34 +1,65 @@
-from transformers import CLIPProcessor, CLIPModel
+import os
 import torch
+import numpy as np
 import faiss
 from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
 
-model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+# Load CLIP model and processor
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-index = faiss.IndexFlatL2(512)
 
-image_map = []
-text_list = []
+# Image directory
+IMAGE_DIR = "keyframes"
 
-def embed_and_search(frame_paths, transcript):
-    global image_map, text_list
-    image_map.clear()
-    text_list.clear()
+# Embedding storage
+image_embeddings = []
+image_map = {}  # index -> file path
 
-    for path in frame_paths:
+# Build image embeddings and FAISS index
+def build_index():
+    global image_embeddings, image_map, index
+    image_embeddings = []
+    image_map = {}
+
+    if not os.path.exists(IMAGE_DIR):
+        print(f"[Error] Image directory not found: {IMAGE_DIR}")
+        return None
+
+    image_files = sorted([
+        os.path.join(IMAGE_DIR, f) for f in os.listdir(IMAGE_DIR)
+        if f.lower().endswith((".jpg", ".png"))
+    ])
+
+    if not image_files:
+        print("[Warning] No keyframes found.")
+        return None
+
+    for idx, path in enumerate(image_files):
         image = Image.open(path).convert("RGB")
-        inputs = processor(images=image, return_tensors="pt")
+        inputs = processor(images=image, return_tensors="pt").to(device)
         with torch.no_grad():
-            emb = model.get_image_features(**inputs).cpu().numpy()
-        index.add(emb)
-        image_map.append(path)
-        text_list.append(transcript)
+            embedding = model.get_image_features(**inputs).cpu().numpy().flatten()
+        image_embeddings.append(embedding)
+        image_map[idx] = path
 
-def search_query(query):
-    inputs = processor(text=query, return_tensors="pt", padding=True)
+    embedding_dim = len(image_embeddings[0])
+    index = faiss.IndexFlatL2(embedding_dim)
+    index.add(np.array(image_embeddings).astype(np.float32))
+
+    return index
+
+# Search using text query
+def search_query(query, k=5):
+    inputs = processor(text=[query], return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
-        query_emb = model.get_text_features(**inputs).cpu().numpy()
-    D, I = index.search(query_emb, k=3)
-    results = [image_map[i] for i in I[0]]
-    texts = [text_list[i] for i in I[0]]
-    return results, texts
+        text_embedding = model.get_text_features(**inputs).cpu().numpy()
+
+    D, I = index.search(text_embedding.astype(np.float32), k)
+    results = [image_map[i] for i in I[0] if i in image_map]
+
+    return results, [f"Score: {d:.2f}" for d in D[0]]
+
+# Initialize the index
+index = build_index()
