@@ -16,8 +16,6 @@ IMAGE_DIR = "keyframes"
 # Embedding storage
 image_embeddings = []
 image_map = {}  # index -> file path
-
-# Build image embeddings and FAISS index
 def build_index():
     global image_embeddings, image_map, index
     image_embeddings = []
@@ -28,8 +26,10 @@ def build_index():
         return None
 
     image_files = sorted([
-        os.path.join(IMAGE_DIR, f) for f in os.listdir(IMAGE_DIR)
-        if f.lower().endswith((".jpg", ".png"))
+        os.path.join(IMAGE_DIR, f)
+        for f in os.listdir(IMAGE_DIR)
+        if f and isinstance(f, str) and f.lower().endswith((".jpg", ".png"))
+           and os.path.isfile(os.path.join(IMAGE_DIR, f))
     ])
 
     if not image_files:
@@ -37,18 +37,22 @@ def build_index():
         return None
 
     for idx, path in enumerate(image_files):
-        image = Image.open(path).convert("RGB")
-        inputs = processor(images=image, return_tensors="pt").to(device)
-        with torch.no_grad():
-            embedding = model.get_image_features(**inputs).cpu().numpy().flatten()
-        image_embeddings.append(embedding)
-        image_map[idx] = path
+        try:
+            image = Image.open(path).convert("RGB")
+            inputs = processor(images=image, return_tensors="pt").to(device)
+            with torch.no_grad():
+                embedding = model.get_image_features(**inputs).cpu().numpy().flatten()
+            image_embeddings.append(embedding)
+            image_map[idx] = path
+        except Exception as e:
+            print(f"[Error] Skipping {path} due to: {e}")
 
     embedding_dim = len(image_embeddings[0])
     index = faiss.IndexFlatL2(embedding_dim)
     index.add(np.array(image_embeddings).astype(np.float32))
 
     return index
+
 
 # Search using text query
 def search_query(query, k=5):
@@ -63,3 +67,4 @@ def search_query(query, k=5):
 
 # Initialize the index
 index = build_index()
+
