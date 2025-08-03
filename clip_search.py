@@ -1,74 +1,67 @@
 import os
+import torch
+import faiss
 import numpy as np
 from PIL import Image
-import torch
+from torchvision import transforms
 from transformers import CLIPProcessor, CLIPModel
-import faiss
 
-# Constants
-IMAGE_DIR = "keyframes"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load model
+# Load CLIP model
 model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-# Globals
-image_map = {}
-index = None
+# Path to store image embeddings
+INDEX_PATH = "clip.index"
+IMAGE_DIR = "frames"
 
-def build_index():
-    global image_map, index
-    image_embeddings = []
-    image_map.clear()
+image_map = []  # Maps index to image file path
 
-    if not os.path.exists(IMAGE_DIR):
-        print(f"Directory '{IMAGE_DIR}' not found.")
-        return None
+def embed_and_search(frame_paths, transcript_text):
+    images = []
+    global image_map
+    image_map = []
 
-    image_files = [
-        os.path.join(IMAGE_DIR, f)
-        for f in os.listdir(IMAGE_DIR)
-        if f and f.lower().endswith((".jpg", ".png")) and os.path.isfile(os.path.join(IMAGE_DIR, f))
-    ]
-
-    if not image_files:
-        print("No images found in keyframes.")
-        return None
-
-    for idx, path in enumerate(image_files):
+    for path in frame_paths:
         try:
             image = Image.open(path).convert("RGB")
-            inputs = processor(images=image, return_tensors="pt").to(device)
-            with torch.no_grad():
-                embedding = model.get_image_features(**inputs).cpu().numpy().flatten()
-            image_embeddings.append(embedding)
-            image_map[idx] = path
+            images.append(image)
+            image_map.append(path)
         except Exception as e:
-            print(f"Error processing {path}: {e}")
+            print(f"Error reading image {path}: {e}")
 
-    embedding_dim = len(image_embeddings[0])
-    index = faiss.IndexFlatL2(embedding_dim)
-    index.add(np.array(image_embeddings).astype(np.float32))
-    return index
+    if not images:
+        print("No valid images found.")
+        return
 
-def search_query(text_query, k=3):
-    if index is None:
-        build_index()
+    # Process and embed images
+    inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
+    with torch.no_grad():
+        image_embeddings = model.get_image_features(**inputs)
 
-    if index is None or index.ntotal == 0:
+    image_embeddings = image_embeddings.cpu().numpy()
+    
+    # Save to FAISS index
+    index = faiss.IndexFlatL2(image_embeddings.shape[1])
+    index.add(image_embeddings)
+    faiss.write_index(index, INDEX_PATH)
+
+def search_query(text):
+    global image_map
+    if not os.path.exists(INDEX_PATH):
         return [], []
 
-    inputs = processor(text=[text_query], return_tensors="pt", padding=True).to(device)
+    # Load FAISS index
+    index = faiss.read_index(INDEX_PATH)
+
+    # Get text embedding
+    inputs = processor(text=[text], return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
-        text_embedding = model.get_text_features(**inputs).cpu().numpy().astype(np.float32)
+        text_embedding = model.get_text_features(**inputs)
 
-    D, I = index.search(text_embedding, k)
+    text_embedding = text_embedding.cpu().numpy()
+    D, I = index.search(text_embedding, k=5)
 
-    results = []
-    captions = []
-    for i in I[0]:
-        if i in image_map:
-            results.append(image_map[i])
-            captions.append(f"Matched: {os.path.basename(image_map[i])}")
-    return results, captions
+    results = [image_map[i] for i in I[0] if i < len(image_map)]
+    return results, [text] * len(results)
