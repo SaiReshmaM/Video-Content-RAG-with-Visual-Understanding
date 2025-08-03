@@ -9,7 +9,8 @@ from extract_frames import extract_key_frames
 from transcribe_audio import transcribe_audio
 from transcribe_audio import transcribe_audio
 from extract_frames import extract_key_frames
-from clip_search import build_index, search_query
+from clip_search import embed_and_search, search_query
+
 
 
 st.title(" Video RAG with Audio + Visual Understanding")
@@ -45,6 +46,7 @@ if query:
         st.image(img, width=300)
         st.caption(txt)
         st.write("Starting transcription...")
+
 
 
 
